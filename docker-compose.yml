@@ -1,0 +1,11 @@
+version: '3.5'
+
+services:
+  movesense-compiler:
+    image: selokth/ms:1.3
+    volumes:
+      - ./source:/root/movesense-device-lib/mySource/
+      - ./output:/root/movesense-device-lib/myBuild/
+    command: bash -c "cd /root/movesense-device-lib/myBuild/ && 
+                      cmake -G Ninja -DMOVESENSE_CORE_LIBRARY=../MovesenseCoreLib/ -DCMAKE_TOOLCHAIN_FILE=../MovesenseCoreLib/toolchain/gcc-nrf52.cmake -DCMAKE_BUILD_TYPE=Release ../mySource && 
+                      ninja dfupkg"
