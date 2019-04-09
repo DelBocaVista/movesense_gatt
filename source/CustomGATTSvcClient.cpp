@@ -9,6 +9,9 @@
 #include <meas_temp/resources.h>
 #include <meas_imu/resources.h>
 
+#define SPAN 4000
+#define NR_SIZE 65535
+
 const char* const CustomGATTSvcClient::LAUNCHABLE_NAME = "CstGattS";
 
 // Nytt
@@ -136,6 +139,8 @@ void CustomGATTSvcClient::onTimer(whiteboard::TimerId timerId)
 }
 
 #include <math.h>
+#include <cstdint>
+
 static void floatToFLOAT(float value, uint8_t* bufferOut)
 {
     bool bNegative = (value < 0.0f);
@@ -233,6 +238,10 @@ uint8_t fromFloat(float x) {
     //return 255.0 * 19.04;
 }
 
+uint16_t convertFloatTo16bitInt (float &num) {
+    return (NR_SIZE * (num + SPAN/2) / SPAN);
+}
+
 void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whiteboard::Value& value, const whiteboard::ParameterList& rParameters)
 {
     switch(resourceId.localResourceId)
@@ -300,6 +309,8 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
             {
                 if (arrayDataAcc.size() >= max) {
                     whiteboard::FloatVector3D accValue = arrayDataAcc[i];
+                    // cout << (b & 0x00FF) << endl; lower 8 bits
+                    // cout << (b & 0xFF00) << endl; upper 8 bits
                     buffer[0] = (uint8_t)(fromFloat(accValue.mX) & 0xff);
                     buffer[1] = (uint8_t)(fromFloat(accValue.mY) & 0xff);
                     buffer[2] = (uint8_t)(fromFloat(accValue.mZ) & 0xff);
