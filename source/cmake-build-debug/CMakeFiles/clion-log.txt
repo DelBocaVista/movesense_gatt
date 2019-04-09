@@ -1,0 +1,11 @@
+/Applications/CLion.app/Contents/bin/cmake/mac/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" /Users/jonaslundvall/Developer/GATT_main_v1/source
+-- The ASM compiler identification is AppleClang
+-- Found assembler: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/cc
+CMake Error at CMakeLists.txt:6 (message):
+  Path to movesense-core library not set.  Add
+  -DMOVESENSE_CORE_LIBRARY=<path_to_core_lib> to cmake command line
+
+
+-- Configuring incomplete, errors occurred!
+See also "/Users/jonaslundvall/Developer/GATT_main_v1/source/cmake-build-debug/CMakeFiles/CMakeOutput.log".
+See also "/Users/jonaslundvall/Developer/GATT_main_v1/source/cmake-build-debug/CMakeFiles/CMakeError.log".
