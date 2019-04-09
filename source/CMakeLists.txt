@@ -1,12 +1,14 @@
-cmake_minimum_required(VERSION 3.13)
-project(source)
+cmake_minimum_required(VERSION 3.4)
+enable_language(C CXX ASM)
 
-set(CMAKE_CXX_STANDARD 14)
+if(NOT DEFINED MOVESENSE_CORE_LIBRARY)
+    # Give error that user must provide  path to movescount-core library
+    message(FATAL_ERROR "Path to movesense-core library not set. Add -DMOVESENSE_CORE_LIBRARY=<path_to_core_lib>  to cmake command line")
+endif()
 
-include_directories(.)
+if(NOT IS_ABSOLUTE ${MOVESENSE_CORE_LIBRARY})
+    set(MOVESENSE_CORE_LIBRARY ${CMAKE_BINARY_DIR}/${MOVESENSE_CORE_LIBRARY})
+endif()
 
-add_executable(source
-        wbresources/resources.cpp
-        App.cpp
-        CustomGATTSvcClient.cpp
-        CustomGATTSvcClient.h)
+include(${MOVESENSE_CORE_LIBRARY}/MovesenseFromStaticLib.cmake REQUIRED)
+

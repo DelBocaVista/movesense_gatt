@@ -9,8 +9,8 @@
 #include <meas_temp/resources.h>
 #include <meas_imu/resources.h>
 
-#define SPAN 4000
-#define NR_SIZE 65535
+#define SPAN 4000.0
+#define NR_SIZE 65535.0
 
 const char* const CustomGATTSvcClient::LAUNCHABLE_NAME = "CstGattS";
 
@@ -227,19 +227,8 @@ void CustomGATTSvcClient::onGetResult(whiteboard::RequestId requestId, whiteboar
     }
 }
 
-float toFloat(uint8_t x) {
-    return x / 255.0;
-}
-
-uint8_t fromFloat(float x) {
-    if (x < 0) return 0;
-    if (x > 255) return 255;
-    return 255.0 * x;
-    //return 255.0 * 19.04;
-}
-
 uint16_t convertFloatTo16bitInt (float &num) {
-    return (NR_SIZE * (num + SPAN/2) / SPAN);
+    return (uint16_t) round(NR_SIZE * (num + SPAN/2) / SPAN);
 }
 
 void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whiteboard::Value& value, const whiteboard::ParameterList& rParameters)
@@ -292,9 +281,10 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
             }
 
             const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataAcc = imu9Data.arrayAcc;
-            // For later use
             const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataGyro = imu9Data.arrayGyro;
             const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataMagn = imu9Data.arrayMagn;
+
+            // For later use
             uint32_t relativeTime = imu9Data.timestamp;
 
             // Just in case arrays would prove to be of different length (probably highly unlikely..)
@@ -302,67 +292,65 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
             if (arrayDataGyro.size() > max) { max = arrayDataGyro.size(); }
             if (arrayDataMagn.size() > max) { max = arrayDataMagn.size(); }
 
-            uint8_t buffer[9]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
+            uint8_t buffer[20]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
             buffer[0]=0;
 
             for (size_t i = 0; i < max; i++)
             {
                 if (arrayDataAcc.size() >= max) {
                     whiteboard::FloatVector3D accValue = arrayDataAcc[i];
-                    // cout << (b & 0x00FF) << endl; lower 8 bits
-                    // cout << (b & 0xFF00) << endl; upper 8 bits
-                    buffer[0] = (uint8_t)(fromFloat(accValue.mX) & 0xff);
-                    buffer[1] = (uint8_t)(fromFloat(accValue.mY) & 0xff);
-                    buffer[2] = (uint8_t)(fromFloat(accValue.mZ) & 0xff);
+
+                    uint16_t accValueX = convertFloatTo16bitInt(accValue.mX);
+                    uint16_t accValueY = convertFloatTo16bitInt(accValue.mY);
+                    uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
+
+                    // Big-endian
+                    buffer[0] = (uint8_t)(accValueX & 0xff);
+                    buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
+                    buffer[2] = (uint8_t)(accValueY & 0xff);
+                    buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
+                    buffer[4] = (uint8_t)(accValueZ & 0xff);
+                    buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
                 }
 
                 if (arrayDataGyro.size() >= max) {
                     whiteboard::FloatVector3D gyroValue = arrayDataGyro[i];
-                    buffer[3] = (uint8_t)(fromFloat(gyroValue.mX) & 0xff);
-                    buffer[4] = (uint8_t)(fromFloat(gyroValue.mY) & 0xff);
-                    buffer[5] = (uint8_t)(fromFloat(gyroValue.mZ) & 0xff);
+
+                    uint16_t gyroValueX = convertFloatTo16bitInt(gyroValue.mX);
+                    uint16_t gyroValueY = convertFloatTo16bitInt(gyroValue.mY);
+                    uint16_t gyroValueZ = convertFloatTo16bitInt(gyroValue.mZ);
+
+                    buffer[6] = (uint8_t)(gyroValueX & 0xff);
+                    buffer[7] = (uint8_t)((gyroValueX >> 8) & 0xff);
+                    buffer[8] = (uint8_t)(gyroValueY & 0xff);
+                    buffer[9] = (uint8_t)((gyroValueY >> 8) & 0xff);
+                    buffer[10] = (uint8_t)(gyroValueZ & 0xff);
+                    buffer[11] = (uint8_t)((gyroValueZ >> 8) & 0xff);
                 }
 
                 if (arrayDataMagn.size() >= max) {
                     whiteboard::FloatVector3D magnValue = arrayDataMagn[i];
-                    buffer[6] = (uint8_t)(fromFloat(magnValue.mX) & 0xff);
-                    buffer[7] = (uint8_t)(fromFloat(magnValue.mY) & 0xff);
-                    buffer[8] = (uint8_t)(fromFloat(magnValue.mZ) & 0xff);
+
+                    uint16_t magnValueX = convertFloatTo16bitInt(magnValue.mX);
+                    uint16_t magnValueY = convertFloatTo16bitInt(magnValue.mY);
+                    uint16_t magnValueZ = convertFloatTo16bitInt(magnValue.mZ);
+
+                    buffer[12] = (uint8_t)(magnValueX & 0xff);
+                    buffer[13] = (uint8_t)((magnValueX >> 8) & 0xff);
+                    buffer[14] = (uint8_t)(magnValueY & 0xff);
+                    buffer[15] = (uint8_t)((magnValueY >> 8) & 0xff);
+                    buffer[16] = (uint8_t)(magnValueZ & 0xff);
+                    buffer[17] = (uint8_t)((magnValueZ >> 8) & 0xff);
                 }
+
+                buffer[18] = (uint8_t)(relativeTime & 0xff);
+                buffer[19] = (uint8_t)((relativeTime >> 8) & 0xff);
 
                 // Write the result to measChar. This results INDICATE to be triggered in GATT service
                 WB_RES::Characteristic newMeasCharValue;
                 newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
                 asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
             }
-
-                /*for (size_t i = 0; i < arrayDataAcc.size(); i++)
-                {
-                    //mSamplesIncluded++;
-
-                    whiteboard::FloatVector3D accValue = arrayDataAcc[i];
-                    float accelerationSq = accValue.mX * accValue.mX +
-                                           accValue.mY * accValue.mY +
-                                           accValue.mZ * accValue.mZ;
-
-                    int accelerationSqRounded = ceil(accelerationSq);
-
-                    accelerationSqRounded = 25;
-                    int test = 19;
-                    // Return data
-                    uint8_t buffer[4]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
-                    buffer[0]=0;
-
-                    buffer[0] = (uint8_t)(accelerationSqRounded & 0xff);
-                    buffer[1] = (uint8_t)(test & 0xff);
-                    buffer[2] = (uint8_t)(accelerationSqRounded>>16 & 0xff);
-
-                    // Write the result to measChar. This results INDICATE to be triggered in GATT service
-                    WB_RES::Characteristic newMeasCharValue;
-                    newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
-                    asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
-                }*/
-
         }
     }
 }
