@@ -7,6 +7,7 @@
 #include "comm_ble_gattsvc/resources.h"
 #include "comm_ble/resources.h"
 #include <meas_temp/resources.h>
+#include "meas_acc/resources.h"
 #include <meas_imu/resources.h>
 #include "whiteboard/builtinTypes/UnknownStructure.h"
 
@@ -60,7 +61,15 @@ bool CustomGATTSvcClient::startModule()
     // Configure custom gatt service
     configGattSvc();
     //mTimer = startTimer(BLINK_PERIOD_MS, true);
-    asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, 26);
+    //asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, 26);
+    whiteboard::ResourceId	mMeasAccResourceId;
+    wb::Result result = getResource("Meas/Acc/104", mMeasAccResourceId);
+    if (!wb::RETURN_OKC(result))
+    {
+        return whiteboard::HTTP_CODE_BAD_REQUEST;
+    }
+    result = asyncSubscribe(mMeasAccResourceId, AsyncRequestOptions::Empty);
+
     return true;
 }
 
@@ -244,11 +253,68 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
             if (parameterRef.getCharHandle() == mIntervalCharHandle) 
             {
                 const WB_RES::Characteristic &charValue = value.convertTo<const WB_RES::Characteristic &>();
-                uint16_t interval = *reinterpret_cast<const uint16_t*>(&charValue.bytes[0]);
+                uint8_t commandValueLower = *reinterpret_cast<const uint8_t*>(&charValue.bytes[0]);
+                uint8_t commandValueHigher = *reinterpret_cast<const uint8_t*>(&charValue.bytes[1]);
 
-                
+                uint16_t commandValue = ((uint16_t)commandValueHigher << 8) | commandValueLower;
 
-                if (interval >= 0 && interval <= 4) {
+                uint16_t commandValueType = commandValue / 100;
+
+                switch(commandValueType) {
+                    case 0 :
+                        // General command settings
+                        break;
+                    case 1 :
+                        // Accelerometer
+                        if (commandValue % 100 > 9) {
+                            // Record data with DataLogger <- implement later
+                        } else {
+                            uint16_t sampleRateValue = commandValue % 10;
+                            uint16_t sampleRate = 13 * (2^sampleRateValue);
+                            wb::Result resultAcc = asyncUnsubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID);
+                            wb::Result resultImu9 = asyncUnsubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID);
+                            wb::Result result = asyncSubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID, AsyncRequestOptions::Empty, sampleRate);
+                            if (wb::RETURN_OKC(result))
+                            {
+                                // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                                uint16_t indicationType = 2;
+                                asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
+                            }
+                        }
+                        break;
+                    case 2 :
+                        // Gyroscope
+                        break;
+                    case 3 :
+                        // Magnetometer
+                        break;
+                    case 6 :
+                        // IMU6
+                        break;
+                    case 9 :
+                        // IMU9
+                        if (commandValue % 100 > 9) {
+                            // Record data with DataLogger <- implement later
+                        } else {
+                            uint16_t sampleRateValue = commandValue % 10;
+                            uint16_t sampleRate = 13 * (2^sampleRateValue);
+                            wb::Result resultAcc = asyncUnsubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID);
+                            wb::Result resultImu9 = asyncUnsubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID);
+                            wb::Result result = asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, sampleRate);
+                            if (wb::RETURN_OKC(result))
+                            {
+                                // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                                uint16_t indicationType = 2;
+                                asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
+                            }
+                        }
+                        break;
+                    default :
+                        // Not implemented, do nothing
+                        break;
+                }
+
+                /*if (interval >= 0 && interval <= 4) {
                     int sampleRate = 13 * (2^interval);
                     wb::Result result = asyncUnsubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, NULL);
                     if (wb::RETURN_OKC(result))
@@ -260,7 +326,7 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                             asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
                         }
                     }
-                }
+                }*/
             }
             else if (parameterRef.getCharHandle() == mMeasCharHandle) 
             {
@@ -352,6 +418,65 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                     buffer[16] = (uint8_t)(magnValueZ & 0xff);
                     buffer[17] = (uint8_t)((magnValueZ >> 8) & 0xff);
                 }
+
+                buffer[18] = (uint8_t)(relativeTime & 0xff);
+                buffer[19] = (uint8_t)((relativeTime >> 8) & 0xff);
+
+                // Write the result to measChar. This results INDICATE to be triggered in GATT service
+                WB_RES::Characteristic newMeasCharValue;
+                newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
+                asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
+            }
+        }
+        break;
+
+        case WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::LID:
+        {
+            // Temperature result or error
+            const WB_RES::AccData& accData = value.convertTo<const WB_RES::AccData&>();
+
+            if (accData.arrayAcc.size() <= 0)
+            {
+                // Some values are missing, do nothing...
+                return;
+            }
+
+            const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataAcc = accData.arrayAcc;
+
+            uint32_t relativeTime = accData.timestamp;
+
+            uint8_t buffer[20]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
+            buffer[0]=0;
+
+            for (size_t i = 0; i < arrayDataAcc.size(); i++)
+            {
+                whiteboard::FloatVector3D accValue = arrayDataAcc[i];
+
+                uint16_t accValueX = convertFloatTo16bitInt(accValue.mX);
+                uint16_t accValueY = convertFloatTo16bitInt(accValue.mY);
+                uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
+
+                // Big-endian
+                buffer[0] = (uint8_t)(accValueX & 0xff);
+                buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
+                buffer[2] = (uint8_t)(accValueY & 0xff);
+                buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
+                buffer[4] = (uint8_t)(accValueZ & 0xff);
+                buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
+
+                buffer[6] = (uint8_t)(accValueX & 0xff);
+                buffer[7] = (uint8_t)((accValueX >> 8) & 0xff);
+                buffer[8] = (uint8_t)(accValueY & 0xff);
+                buffer[9] = (uint8_t)((accValueY >> 8) & 0xff);
+                buffer[10] = (uint8_t)(accValueZ & 0xff);
+                buffer[11] = (uint8_t)((accValueZ >> 8) & 0xff);
+                buffer[12] = (uint8_t)(accValueX & 0xff);
+                buffer[13] = (uint8_t)((accValueX >> 8) & 0xff);
+                buffer[14] = (uint8_t)(accValueY & 0xff);
+                buffer[15] = (uint8_t)((accValueY >> 8) & 0xff);
+                buffer[16] = (uint8_t)(accValueZ & 0xff);
+                buffer[17] = (uint8_t)((accValueZ >> 8) & 0xff);
+
 
                 buffer[18] = (uint8_t)(relativeTime & 0xff);
                 buffer[19] = (uint8_t)((relativeTime >> 8) & 0xff);
