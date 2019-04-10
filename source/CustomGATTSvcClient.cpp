@@ -8,6 +8,7 @@
 #include "comm_ble/resources.h"
 #include <meas_temp/resources.h>
 #include <meas_imu/resources.h>
+#include "whiteboard/builtinTypes/UnknownStructure.h"
 
 #define SPAN 4000.0
 #define NR_SIZE 65535.0
@@ -21,7 +22,7 @@ whiteboard::TimerId mTimer;
 const uint16_t measCharUUID16 = 0x2A1C;
 const uint16_t intervalCharUUID16 = 0x2A21;
 
-const int DEFAULT_MEASUREMENT_INTERVAL_SECS = 3;
+const int DEFAULT_MEASUREMENT_INTERVAL_SECS = 1;
 
 CustomGATTSvcClient::CustomGATTSvcClient()
     : ResourceClient(WBDEBUG_NAME(__FUNCTION__), WB_EXEC_CTX_APPLICATION),
@@ -59,7 +60,7 @@ bool CustomGATTSvcClient::startModule()
     // Configure custom gatt service
     configGattSvc();
     //mTimer = startTimer(BLINK_PERIOD_MS, true);
-    asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE(), AsyncRequestOptions::Empty, 13);
+    asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, 26);
     return true;
 }
 
@@ -135,7 +136,7 @@ void CustomGATTSvcClient::onTimer(whiteboard::TimerId timerId)
 
     // Take temperature reading
     //asyncGet(WB_RES::LOCAL::MEAS_TEMP(), NULL);
-    asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE(), AsyncRequestOptions::Empty, 13);
+    //asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE(), AsyncRequestOptions::Empty, 13);
 }
 
 #include <math.h>
@@ -231,6 +232,8 @@ uint16_t convertFloatTo16bitInt (float &num) {
     return (uint16_t) round(NR_SIZE * (num + SPAN/2) / SPAN);
 }
 
+
+
 void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whiteboard::Value& value, const whiteboard::ParameterList& rParameters)
 {
     switch(resourceId.localResourceId)
@@ -242,14 +245,21 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
             {
                 const WB_RES::Characteristic &charValue = value.convertTo<const WB_RES::Characteristic &>();
                 uint16_t interval = *reinterpret_cast<const uint16_t*>(&charValue.bytes[0]);
-                DEBUGLOG("onNotify: mIntervalCharHandle: len: %d, new interval: %d", charValue.bytes.size(), interval);
-                // Update the interval
-                if (interval >= 1 && interval <= 65535)
-                    mMeasIntervalSecs = interval;
-                // restart timer if exists
-                if (mMeasurementTimer != whiteboard::ID_INVALID_TIMER) {
-                    stopTimer(mMeasurementTimer);
-                    mMeasurementTimer = startTimer(mMeasIntervalSecs*1000, true);
+
+                
+
+                if (interval >= 0 && interval <= 4) {
+                    int sampleRate = 13 * (2^interval);
+                    wb::Result result = asyncUnsubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, NULL);
+                    if (wb::RETURN_OKC(result))
+                    {
+                        wb::Result result2 = asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, sampleRate);
+                        if (wb::RETURN_OKC(result2)) {
+                            uint16_t indicationType = 2; // SHORT_VISUAL_INDICATION, defined in ui/ind.yaml
+                            // Make PUT request to trigger led blink
+                            asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
+                        }
+                    }
                 }
             }
             else if (parameterRef.getCharHandle() == mMeasCharHandle) 
