@@ -19,6 +19,7 @@ const char* const CustomGATTSvcClient::LAUNCHABLE_NAME = "CstGattS";
 // Nytt
 const size_t BLINK_PERIOD_MS = 800;
 whiteboard::TimerId mTimer;
+whiteboard::ResourceId	mMeasAccResourceId;
 
 const uint16_t measCharUUID16 = 0x2A1C;
 const uint16_t intervalCharUUID16 = 0x2A21;
@@ -63,7 +64,7 @@ bool CustomGATTSvcClient::startModule()
     //mTimer = startTimer(BLINK_PERIOD_MS, true);
     //asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, 26);
     whiteboard::ResourceId	mMeasAccResourceId;
-    wb::Result result = getResource("Meas/Acc/104", mMeasAccResourceId);
+    wb::Result result = getResource("Meas/Acc/52", mMeasAccResourceId);
     if (!wb::RETURN_OKC(result))
     {
         return whiteboard::HTTP_CODE_BAD_REQUEST;
@@ -106,11 +107,11 @@ void CustomGATTSvcClient::configGattSvc() {
     
     // Define the CMD characteristics
     //WB_RES::GattProperty measCharProp = WB_RES::GattProperty::INDICATE;
-    WB_RES::GattProperty measCharProp[2] = {WB_RES::GattProperty::INDICATE, WB_RES::GattProperty::READ};
+    WB_RES::GattProperty measCharProp[3] = {WB_RES::GattProperty::NOTIFY, WB_RES::GattProperty::READ, WB_RES::GattProperty::WRITE};
     WB_RES::GattProperty intervalCharProps[2] = {WB_RES::GattProperty::READ, WB_RES::GattProperty::WRITE};
 
     //measChar.props = whiteboard::MakeArray<WB_RES::GattProperty>( &measCharProp, 1);
-    measChar.props = whiteboard::MakeArray<WB_RES::GattProperty>( measCharProp, 2);
+    measChar.props = whiteboard::MakeArray<WB_RES::GattProperty>( measCharProp, 3);
     measChar.uuid = whiteboard::MakeArray<uint8_t>( reinterpret_cast<const uint8_t*>(&measCharUUID16), 2);
 
     intervalChar.props = whiteboard::MakeArray<WB_RES::GattProperty>( intervalCharProps, 2);
@@ -120,12 +121,6 @@ void CustomGATTSvcClient::configGattSvc() {
     // Combine chars to service
     customGattSvc.uuid = whiteboard::MakeArray<uint8_t>( reinterpret_cast<const uint8_t*>(&healthThermometerSvcUUID16), 2);
     customGattSvc.chars = whiteboard::MakeArray<WB_RES::GattChar>(characteristics, 2);
-
-    /////////// Extra
-    uint16_t indicationType = 2; // SHORT_VISUAL_INDICATION, defined in ui/ind.yaml
-    // Make PUT request to trigger led blink
-    asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
-    ////////////
 
     // Create custom service
     asyncPost(WB_RES::LOCAL::COMM_BLE_GATTSVC(), AsyncRequestOptions::Empty, customGattSvc);
@@ -242,7 +237,7 @@ uint16_t convertFloatTo16bitInt (float &num) {
 }
 
 
-
+#include <string>
 void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whiteboard::Value& value, const whiteboard::ParameterList& rParameters)
 {
     switch(resourceId.localResourceId)
@@ -256,29 +251,58 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                 uint8_t commandValueLower = *reinterpret_cast<const uint8_t*>(&charValue.bytes[0]);
                 uint8_t commandValueHigher = *reinterpret_cast<const uint8_t*>(&charValue.bytes[1]);
 
-                uint16_t commandValue = ((uint16_t)commandValueHigher << 8) | commandValueLower;
+                if (commandValueHigher == 255 && commandValueLower == 255) {
+                    // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                    uint16_t indicationType = 2;
+                    asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
+                }
+
+                // uint16_t commandValue = ((uint16_t)commandValueHigher << 8) | commandValueLower;
+                uint16_t commandValue = ((uint16_t)commandValueLower << 8) | commandValueHigher;
 
                 uint16_t commandValueType = commandValue / 100;
 
                 switch(commandValueType) {
                     case 0 :
                         // General command settings
+                        switch(commandValue % 100) {
+                            case 0:
+                                // Shutdown - i.e. stop subscribing to chosen resource.
+                                break;
+                            case 1:
+                                // Start subscribing - i.e. to the chosen resource.
+                                std::string name = "John";
+                                int age = 21;
+                                std::string result;
+
+                                // 2. with C++11
+                                result = name + std::to_string(age);
+                            default:
+                                // Not valid command. Do nothing.
+                                break;
+                        }
                         break;
                     case 1 :
                         // Accelerometer
                         if (commandValue % 100 > 9) {
                             // Record data with DataLogger <- implement later
                         } else {
-                            uint16_t sampleRateValue = commandValue % 10;
+                            /*uint16_t sampleRateValue = commandValue % 10;
                             uint16_t sampleRate = 13 * (2^sampleRateValue);
                             wb::Result resultAcc = asyncUnsubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID);
                             wb::Result resultImu9 = asyncUnsubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID);
-                            wb::Result result = asyncSubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID, AsyncRequestOptions::Empty, sampleRate);
-                            if (wb::RETURN_OKC(result))
-                            {
-                                // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                                uint16_t indicationType = 2;
-                                asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
+                            wb::Result result = asyncSubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID, AsyncRequestOptions::Empty, sampleRate);*/
+                            wb::Result result = asyncUnsubscribe(mMeasAccResourceId, NULL);
+                            if (wb::RETURN_OKC(result)) {
+                                DEBUGLOG("asyncUnsubscribe threw error: %u", result);
+
+                                wb::Result result = getResource("Meas/Acc/13", mMeasAccResourceId);
+                                if (wb::RETURN_OKC(result)) {
+                                    // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                                    uint16_t indicationType = 2;
+                                    asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
+                                             indicationType);
+                                }
                             }
                         }
                         break;
