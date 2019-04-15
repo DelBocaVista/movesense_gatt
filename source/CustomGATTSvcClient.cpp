@@ -9,6 +9,7 @@
 #include <meas_temp/resources.h>
 #include "meas_acc/resources.h"
 #include <meas_imu/resources.h>
+#include <cstdint>
 #include "whiteboard/builtinTypes/UnknownStructure.h"
 
 #define SPAN 4000.0
@@ -19,7 +20,14 @@ const char* const CustomGATTSvcClient::LAUNCHABLE_NAME = "CstGattS";
 // Nytt
 const size_t BLINK_PERIOD_MS = 800;
 whiteboard::TimerId mTimer;
-whiteboard::ResourceId	mMeasAccResourceId;
+whiteboard::ResourceId	mMeasResourceId;
+char resourceFullString[30] = "Meas/Acc/13";
+char measAccResourceBase[] = "Meas/Acc/";
+char measGyroResourceBase[] = "Meas/Gyro/";
+char measMagnResourceBase[] = "Meas/Magn/";
+char measIMU6ResourceBase[] = "Meas/IMU6/";
+char measIMU9ResourceBase[] = "Meas/IMU9/";
+bool isRunning = false;
 
 const uint16_t measCharUUID16 = 0x2A1C;
 const uint16_t intervalCharUUID16 = 0x2A21;
@@ -63,13 +71,14 @@ bool CustomGATTSvcClient::startModule()
     configGattSvc();
     //mTimer = startTimer(BLINK_PERIOD_MS, true);
     //asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, 26);
-    whiteboard::ResourceId	mMeasAccResourceId;
-    wb::Result result = getResource("Meas/Acc/52", mMeasAccResourceId);
+    /*whiteboard::ResourceId	mMeasAccResourceId;
+    char test[] = "Meas/Acc/52";
+    wb::Result result = getResource(test, mMeasAccResourceId);
     if (!wb::RETURN_OKC(result))
     {
         return whiteboard::HTTP_CODE_BAD_REQUEST;
     }
-    result = asyncSubscribe(mMeasAccResourceId, AsyncRequestOptions::Empty);
+    result = asyncSubscribe(mMeasAccResourceId, AsyncRequestOptions::Empty);*/
 
     return true;
 }
@@ -236,8 +245,31 @@ uint16_t convertFloatTo16bitInt (float &num) {
     return (uint16_t) round(NR_SIZE * (num + SPAN/2) / SPAN);
 }
 
+void buildResourceString(char *base, uint16_t samplerate, char destination[]) {
 
-#include <string>
+    int i;
+    for(i = 0; *base != '\0'; base++) {
+        destination[i] = *base;
+        i++;
+    }
+
+    int reversed = 0;
+
+    while (samplerate != 0) {
+        reversed = reversed * 10;
+        reversed = reversed + samplerate % 10;
+        samplerate /= 10;
+    }
+
+    while(reversed != 0) {
+        destination[i] = 48 + (reversed % 10);
+        i++;
+        reversed /= 10;
+    }
+
+    destination[i] = '\0';
+}
+
 void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whiteboard::Value& value, const whiteboard::ParameterList& rParameters)
 {
     switch(resourceId.localResourceId)
@@ -268,15 +300,43 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                         switch(commandValue % 100) {
                             case 0:
                                 // Shutdown - i.e. stop subscribing to chosen resource.
+                                if (isRunning)
+                                {
+                                    wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
+                                    if (wb::RETURN_OKC(result)) {
+                                        uint16_t indicationType = 2;
+                                        asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
+                                                 indicationType);
+                                        isRunning = false;
+                                    }
+                                }
                                 break;
                             case 1:
                                 // Start subscribing - i.e. to the chosen resource.
-                                std::string name = "John";
-                                int age = 21;
-                                std::string result;
+                                if (isRunning) {
+                                    wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
+                                    if (wb::RETURN_OKC(result)) {
 
-                                // 2. with C++11
-                                result = name + std::to_string(age);
+                                        wb::Result result = getResource(resourceFullString, mMeasResourceId);
+                                        if (wb::RETURN_OKC(result)) {
+                                            // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                                            uint16_t indicationType = 2;
+                                            asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
+                                                     indicationType);
+                                            isRunning = true;
+                                        }
+                                    }
+                                } else {
+                                    wb::Result result = getResource(resourceFullString, mMeasResourceId);
+                                    if (wb::RETURN_OKC(result)) {
+                                        // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                                        uint16_t indicationType = 2;
+                                        asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
+                                                 indicationType);
+                                        isRunning = true;
+                                    }
+                                }
+                                break;
                             default:
                                 // Not valid command. Do nothing.
                                 break;
@@ -287,37 +347,48 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                         if (commandValue % 100 > 9) {
                             // Record data with DataLogger <- implement later
                         } else {
-                            /*uint16_t sampleRateValue = commandValue % 10;
-                            uint16_t sampleRate = 13 * (2^sampleRateValue);
-                            wb::Result resultAcc = asyncUnsubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID);
-                            wb::Result resultImu9 = asyncUnsubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID);
-                            wb::Result result = asyncSubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID, AsyncRequestOptions::Empty, sampleRate);*/
-                            wb::Result result = asyncUnsubscribe(mMeasAccResourceId, NULL);
-                            if (wb::RETURN_OKC(result)) {
-                                DEBUGLOG("asyncUnsubscribe threw error: %u", result);
+                            uint16_t sampleRateValue = commandValue % 10;
+                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
 
-                                wb::Result result = getResource("Meas/Acc/13", mMeasAccResourceId);
-                                if (wb::RETURN_OKC(result)) {
-                                    // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                                    uint16_t indicationType = 2;
-                                    asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
-                                             indicationType);
-                                }
-                            }
+                            buildResourceString(measAccResourceBase, sampleRate, resourceFullString);
                         }
                         break;
                     case 2 :
                         // Gyroscope
+                        if (commandValue % 100 > 9) {
+                            // Record data with DataLogger <- implement later
+                        } else {
+                            uint16_t sampleRateValue = commandValue % 10;
+                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
+
+                            buildResourceString(measGyroResourceBase, sampleRate, resourceFullString);
+                        }
                         break;
                     case 3 :
                         // Magnetometer
+                        if (commandValue % 100 > 9) {
+                            // Record data with DataLogger <- implement later
+                        } else {
+                            uint16_t sampleRateValue = commandValue % 10;
+                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
+
+                            buildResourceString(measMagnResourceBase, sampleRate, resourceFullString);
+                        }
                         break;
                     case 6 :
                         // IMU6
+                        if (commandValue % 100 > 9) {
+                            // Record data with DataLogger <- implement later
+                        } else {
+                            uint16_t sampleRateValue = commandValue % 10;
+                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
+
+                            buildResourceString(measIMU6ResourceBase, sampleRate, resourceFullString);
+                        }
                         break;
                     case 9 :
                         // IMU9
-                        if (commandValue % 100 > 9) {
+                        /*if (commandValue % 100 > 9) {
                             // Record data with DataLogger <- implement later
                         } else {
                             uint16_t sampleRateValue = commandValue % 10;
@@ -331,6 +402,14 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                                 uint16_t indicationType = 2;
                                 asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
                             }
+                        }*/
+                        if (commandValue % 100 > 9) {
+                            // Record data with DataLogger <- implement later
+                        } else {
+                            uint16_t sampleRateValue = commandValue % 10;
+                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
+
+                            buildResourceString(measIMU9ResourceBase, sampleRate, resourceFullString);
                         }
                         break;
                     default :
@@ -354,7 +433,7 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
             }
             else if (parameterRef.getCharHandle() == mMeasCharHandle) 
             {
-                const WB_RES::Characteristic &charValue = value.convertTo<const WB_RES::Characteristic &>();
+                /*const WB_RES::Characteristic &charValue = value.convertTo<const WB_RES::Characteristic &>();
                 bool bNotificationsEnabled = charValue.notifications.hasValue() ? charValue.notifications.getValue() : false;
                 DEBUGLOG("onNotify: mMeasCharHandle. bNotificationsEnabled: %d", bNotificationsEnabled);
                 // Start or stop the timer
@@ -364,13 +443,63 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                     mMeasurementTimer = whiteboard::ID_INVALID_TIMER;
                 }
                 if (bNotificationsEnabled)
-                    mMeasurementTimer = startTimer(mMeasIntervalSecs*1000, true);
+                    mMeasurementTimer = startTimer(mMeasIntervalSecs*1000, true);*/
+                const WB_RES::Characteristic &charValue = value.convertTo<const WB_RES::Characteristic &>();
+                bool bNotificationsEnabled = charValue.notifications.hasValue() ? charValue.notifications.getValue() : false;
+
+                if (bNotificationsEnabled) {
+                    if (isRunning) {
+                        wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
+                        if (wb::RETURN_OKC(result)) {
+
+                            wb::Result result2 = getResource(resourceFullString, mMeasResourceId);
+                            if (wb::RETURN_OKC(result2)) {
+                                // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                                wb::Result result3 = asyncSubscribe(mMeasResourceId, AsyncRequestOptions::Empty);
+                                if (wb::RETURN_OKC(result3)) {
+                                    uint16_t indicationType = 2;
+                                    asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
+                                             indicationType);
+                                    isRunning = true;
+                                }
+                            }
+                        }
+                    } else {
+                        wb::Result result = getResource(resourceFullString, mMeasResourceId);
+                        if (wb::RETURN_OKC(result)) {
+                            // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                            wb::Result result2 = asyncSubscribe(mMeasResourceId, AsyncRequestOptions::Empty);
+                            if (wb::RETURN_OKC(result2)) {
+                                uint16_t indicationType = 2;
+                                asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
+                                         indicationType);
+                                isRunning = true;
+                            }
+                        }
+                    }
+                } else {
+                    if (isRunning) {
+                        wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
+                        if (wb::RETURN_OKC(result)) {
+                            // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                            uint16_t indicationType = 2;
+                            asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
+                                         indicationType);
+                            isRunning = false;
+                        }
+                    }
+                }
             }
         }
         break;
 
         case WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::LID:
         {
+            /*if (!isRunning) {
+                // Not running, do nothing...
+                return;
+            }*/
+
             // Temperature result or error
             const WB_RES::IMU9Data& imu9Data = value.convertTo<const WB_RES::IMU9Data&>();
 
@@ -456,6 +585,11 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
 
         case WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::LID:
         {
+            /*if (!isRunning) {
+                // Not running, do nothing...
+                return;
+            }*/
+
             // Temperature result or error
             const WB_RES::AccData& accData = value.convertTo<const WB_RES::AccData&>();
 
