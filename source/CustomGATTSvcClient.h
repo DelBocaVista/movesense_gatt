@@ -96,6 +96,29 @@ private:
     */
     virtual void handleNotification(bool isNotificationEnabled);
 
+    /**
+    *   Convert 4 byte float to 2 byte unsigned int (with small accuracy loss)
+    *
+    * @param num Float number to convert
+    * @return Converted 2 byte unsigned int
+    */
+    virtual uint16_t convertFloatTo16bitInt (float &num);
+
+    /**
+    *   Handle received IMU9 sensor data
+    *
+    *   @param data IMU9 sensor data
+    */
+    virtual void handleSensorDataIMU9(uint32_t timestamp, const whiteboard::Array<whiteboard::FloatVector3D>& accData, const whiteboard::Array<whiteboard::FloatVector3D>& gyroData, const whiteboard::Array<whiteboard::FloatVector3D>& magnData);
+
+    /**
+    *   Handle received single sensor data
+    *
+    * @param timestamp Timestamp of data
+    * @param arrayData Array of sensor data
+    */
+    virtual void handleSingleSensorData(uint32_t timestamp, const whiteboard::Array<whiteboard::FloatVector3D>& arrayData);
+
 private:
     void configGattSvc();
 

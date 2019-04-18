@@ -7,7 +7,9 @@
 #include "comm_ble_gattsvc/resources.h"
 #include "comm_ble/resources.h"
 #include <meas_temp/resources.h>
-#include "meas_acc/resources.h"
+#include <meas_acc/resources.h>
+#include <meas_gyro/resources.h>
+#include <meas_magn/resources.h>
 #include <meas_imu/resources.h>
 #include <cstdint>
 #include "whiteboard/builtinTypes/UnknownStructure.h"
@@ -17,9 +19,6 @@
 
 const char* const CustomGATTSvcClient::LAUNCHABLE_NAME = "CstGattS";
 
-// Nytt
-const size_t BLINK_PERIOD_MS = 800;
-whiteboard::TimerId mTimer;
 whiteboard::ResourceId	mMeasResourceId;
 char resourceFullString[30] = "Meas/Acc/13";
 char measAccResourceBase[] = "Meas/Acc/";
@@ -45,7 +44,6 @@ CustomGATTSvcClient::CustomGATTSvcClient()
       mMeasCharResource(whiteboard::ID_INVALID_RESOURCE),
       mMeasurementTimer(whiteboard::ID_INVALID_TIMER)
 {
-    mTimer = whiteboard::ID_INVALID_TIMER;
 }
 
 CustomGATTSvcClient::~CustomGATTSvcClient()
@@ -76,23 +74,11 @@ bool CustomGATTSvcClient::startModule()
 /** @see whiteboard::ILaunchableModule::startModule */
 void CustomGATTSvcClient::stopModule()
 {
-    // Stop timer if running
-    if (mMeasurementTimer != whiteboard::ID_INVALID_TIMER)
-        stopTimer(mMeasurementTimer);
-
-    // Nytt
-    if (mTimer != whiteboard::ID_INVALID_TIMER)
-        stopTimer(mTimer);
-
-    mTimer = whiteboard::ID_INVALID_TIMER;
-
     // Unsubscribe if needed
     if (mIntervalCharResource != whiteboard::ID_INVALID_RESOURCE)
         asyncUnsubscribe(mIntervalCharResource);
     if (mMeasCharResource != whiteboard::ID_INVALID_RESOURCE)
         asyncUnsubscribe(mMeasCharResource);
-
-    mMeasurementTimer = whiteboard::ID_INVALID_TIMER;
 }
 
 #include "ui_ind/resources.h"
@@ -105,11 +91,9 @@ void CustomGATTSvcClient::configGattSvc() {
     const uint16_t healthThermometerSvcUUID16 = 0x1809;
     
     // Define the CMD characteristics
-    //WB_RES::GattProperty measCharProp = WB_RES::GattProperty::INDICATE;
     WB_RES::GattProperty measCharProp[3] = {WB_RES::GattProperty::NOTIFY, WB_RES::GattProperty::READ, WB_RES::GattProperty::WRITE};
     WB_RES::GattProperty intervalCharProps[2] = {WB_RES::GattProperty::READ, WB_RES::GattProperty::WRITE};
 
-    //measChar.props = whiteboard::MakeArray<WB_RES::GattProperty>( &measCharProp, 1);
     measChar.props = whiteboard::MakeArray<WB_RES::GattProperty>( measCharProp, 3);
     measChar.uuid = whiteboard::MakeArray<uint8_t>( reinterpret_cast<const uint8_t*>(&measCharUUID16), 2);
 
@@ -126,7 +110,6 @@ void CustomGATTSvcClient::configGattSvc() {
 }
 
 #include <math.h>
-#include <cstdint>
 
 void CustomGATTSvcClient::onGetResult(whiteboard::RequestId requestId, whiteboard::ResourceId resourceId, whiteboard::Result resultCode, const whiteboard::Value& rResultData)
 {
@@ -167,7 +150,7 @@ void CustomGATTSvcClient::onGetResult(whiteboard::RequestId requestId, whiteboar
     }
 }
 
-uint16_t convertFloatTo16bitInt (float &num) {
+uint16_t CustomGATTSvcClient::convertFloatTo16bitInt (float &num) {
     return (uint16_t) round(NR_SIZE * (num + SPAN/2) / SPAN);
 }
 
@@ -238,73 +221,10 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
             const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataGyro = imu9Data.arrayGyro;
             const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataMagn = imu9Data.arrayMagn;
 
-            // For later use
+            // Timestamp
             uint32_t relativeTime = imu9Data.timestamp;
 
-            // Just in case arrays would prove to be of different length (probably highly unlikely..)
-            size_t max = arrayDataAcc.size();
-            if (arrayDataGyro.size() > max) { max = arrayDataGyro.size(); }
-            if (arrayDataMagn.size() > max) { max = arrayDataMagn.size(); }
-
-            uint8_t buffer[20]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
-            buffer[0]=0;
-
-            for (size_t i = 0; i < max; i++)
-            {
-                if (arrayDataAcc.size() >= max) {
-                    whiteboard::FloatVector3D accValue = arrayDataAcc[i];
-
-                    uint16_t accValueX = convertFloatTo16bitInt(accValue.mX);
-                    uint16_t accValueY = convertFloatTo16bitInt(accValue.mY);
-                    uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
-
-                    // Big-endian
-                    buffer[0] = (uint8_t)(accValueX & 0xff);
-                    buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
-                    buffer[2] = (uint8_t)(accValueY & 0xff);
-                    buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
-                    buffer[4] = (uint8_t)(accValueZ & 0xff);
-                    buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
-                }
-
-                if (arrayDataGyro.size() >= max) {
-                    whiteboard::FloatVector3D gyroValue = arrayDataGyro[i];
-
-                    uint16_t gyroValueX = convertFloatTo16bitInt(gyroValue.mX);
-                    uint16_t gyroValueY = convertFloatTo16bitInt(gyroValue.mY);
-                    uint16_t gyroValueZ = convertFloatTo16bitInt(gyroValue.mZ);
-
-                    buffer[6] = (uint8_t)(gyroValueX & 0xff);
-                    buffer[7] = (uint8_t)((gyroValueX >> 8) & 0xff);
-                    buffer[8] = (uint8_t)(gyroValueY & 0xff);
-                    buffer[9] = (uint8_t)((gyroValueY >> 8) & 0xff);
-                    buffer[10] = (uint8_t)(gyroValueZ & 0xff);
-                    buffer[11] = (uint8_t)((gyroValueZ >> 8) & 0xff);
-                }
-
-                if (arrayDataMagn.size() >= max) {
-                    whiteboard::FloatVector3D magnValue = arrayDataMagn[i];
-
-                    uint16_t magnValueX = convertFloatTo16bitInt(magnValue.mX);
-                    uint16_t magnValueY = convertFloatTo16bitInt(magnValue.mY);
-                    uint16_t magnValueZ = convertFloatTo16bitInt(magnValue.mZ);
-
-                    buffer[12] = (uint8_t)(magnValueX & 0xff);
-                    buffer[13] = (uint8_t)((magnValueX >> 8) & 0xff);
-                    buffer[14] = (uint8_t)(magnValueY & 0xff);
-                    buffer[15] = (uint8_t)((magnValueY >> 8) & 0xff);
-                    buffer[16] = (uint8_t)(magnValueZ & 0xff);
-                    buffer[17] = (uint8_t)((magnValueZ >> 8) & 0xff);
-                }
-
-                buffer[18] = (uint8_t)(relativeTime & 0xff);
-                buffer[19] = (uint8_t)((relativeTime >> 8) & 0xff);
-
-                // Write the result to measChar. This results INDICATE to be triggered in GATT service
-                WB_RES::Characteristic newMeasCharValue;
-                newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
-                asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
-            }
+            handleSensorDataIMU9(relativeTime, arrayDataAcc, arrayDataGyro, arrayDataMagn);
         }
         break;
 
@@ -323,47 +243,45 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
 
             uint32_t relativeTime = accData.timestamp;
 
-            uint8_t buffer[20]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
-            buffer[0]=0;
+            handleSingleSensorData(relativeTime, arrayDataAcc);
+        }
+        break;
 
-            for (size_t i = 0; i < arrayDataAcc.size(); i++)
+        case WB_RES::LOCAL::MEAS_GYRO_SAMPLERATE::LID:
+        {
+            // Accelerometer result or error
+            const WB_RES::GyroData& gyroData = value.convertTo<const WB_RES::GyroData&>();
+
+            if (gyroData.arrayGyro.size() <= 0)
             {
-                whiteboard::FloatVector3D accValue = arrayDataAcc[i];
-
-                uint16_t accValueX = convertFloatTo16bitInt(accValue.mX);
-                uint16_t accValueY = convertFloatTo16bitInt(accValue.mY);
-                uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
-
-                // Big-endian
-                buffer[0] = (uint8_t)(accValueX & 0xff);
-                buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
-                buffer[2] = (uint8_t)(accValueY & 0xff);
-                buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
-                buffer[4] = (uint8_t)(accValueZ & 0xff);
-                buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
-
-                buffer[6] = (uint8_t)(accValueX & 0xff);
-                buffer[7] = (uint8_t)((accValueX >> 8) & 0xff);
-                buffer[8] = (uint8_t)(accValueY & 0xff);
-                buffer[9] = (uint8_t)((accValueY >> 8) & 0xff);
-                buffer[10] = (uint8_t)(accValueZ & 0xff);
-                buffer[11] = (uint8_t)((accValueZ >> 8) & 0xff);
-                buffer[12] = (uint8_t)(accValueX & 0xff);
-                buffer[13] = (uint8_t)((accValueX >> 8) & 0xff);
-                buffer[14] = (uint8_t)(accValueY & 0xff);
-                buffer[15] = (uint8_t)((accValueY >> 8) & 0xff);
-                buffer[16] = (uint8_t)(accValueZ & 0xff);
-                buffer[17] = (uint8_t)((accValueZ >> 8) & 0xff);
-
-
-                buffer[18] = (uint8_t)(relativeTime & 0xff);
-                buffer[19] = (uint8_t)((relativeTime >> 8) & 0xff);
-
-                // Write the result to measChar. This results INDICATE to be triggered in GATT service
-                WB_RES::Characteristic newMeasCharValue;
-                newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
-                asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
+                // Some values are missing, do nothing...
+                return;
             }
+
+            const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataGyro = gyroData.arrayGyro;
+
+            uint32_t relativeTime = gyroData.timestamp;
+
+            handleSingleSensorData(relativeTime, arrayDataGyro);
+        }
+        break;
+
+        case WB_RES::LOCAL::MEAS_MAGN_SAMPLERATE::LID:
+        {
+            // Accelerometer result or error
+            const WB_RES::MagnData& magnData = value.convertTo<const WB_RES::MagnData&>();
+
+            if (magnData.arrayMagn.size() <= 0)
+            {
+                // Some values are missing, do nothing...
+                return;
+            }
+
+            const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataMagn = magnData.arrayMagn;
+
+            uint32_t relativeTime = magnData.timestamp;
+
+            handleSingleSensorData(relativeTime, arrayDataMagn);
         }
     }
 }
@@ -510,5 +428,116 @@ void CustomGATTSvcClient::handleNotification(bool isNotificationEnabled) {
                 isRunning = false;
             }
         }
+    }
+}
+
+void CustomGATTSvcClient::handleSensorDataIMU9(uint32_t timestamp, const whiteboard::Array<whiteboard::FloatVector3D>& accData, const whiteboard::Array<whiteboard::FloatVector3D>& gyroData, const whiteboard::Array<whiteboard::FloatVector3D>& magnData) {
+    // Just in case arrays would prove to be of different length (probably highly unlikely..)
+    size_t max = accData.size();
+    if (gyroData.size() > max) { max = gyroData.size(); }
+    if (magnData.size() > max) { max = magnData.size(); }
+
+    uint8_t buffer[20]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
+    buffer[0]=0;
+
+    for (size_t i = 0; i < max; i++)
+    {
+        if (accData.size() >= max) {
+            whiteboard::FloatVector3D accValue = accData[i];
+
+            uint16_t accValueX = convertFloatTo16bitInt(accValue.mX);
+            uint16_t accValueY = convertFloatTo16bitInt(accValue.mY);
+            uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
+
+            // Big-endian
+            buffer[0] = (uint8_t)(accValueX & 0xff);
+            buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
+            buffer[2] = (uint8_t)(accValueY & 0xff);
+            buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
+            buffer[4] = (uint8_t)(accValueZ & 0xff);
+            buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
+        }
+
+        if (gyroData.size() >= max) {
+            whiteboard::FloatVector3D gyroValue = gyroData[i];
+
+            uint16_t gyroValueX = convertFloatTo16bitInt(gyroValue.mX);
+            uint16_t gyroValueY = convertFloatTo16bitInt(gyroValue.mY);
+            uint16_t gyroValueZ = convertFloatTo16bitInt(gyroValue.mZ);
+
+            buffer[6] = (uint8_t)(gyroValueX & 0xff);
+            buffer[7] = (uint8_t)((gyroValueX >> 8) & 0xff);
+            buffer[8] = (uint8_t)(gyroValueY & 0xff);
+            buffer[9] = (uint8_t)((gyroValueY >> 8) & 0xff);
+            buffer[10] = (uint8_t)(gyroValueZ & 0xff);
+            buffer[11] = (uint8_t)((gyroValueZ >> 8) & 0xff);
+        }
+
+        if (magnData.size() >= max) {
+            whiteboard::FloatVector3D magnValue = magnData[i];
+
+            uint16_t magnValueX = convertFloatTo16bitInt(magnValue.mX);
+            uint16_t magnValueY = convertFloatTo16bitInt(magnValue.mY);
+            uint16_t magnValueZ = convertFloatTo16bitInt(magnValue.mZ);
+
+            buffer[12] = (uint8_t)(magnValueX & 0xff);
+            buffer[13] = (uint8_t)((magnValueX >> 8) & 0xff);
+            buffer[14] = (uint8_t)(magnValueY & 0xff);
+            buffer[15] = (uint8_t)((magnValueY >> 8) & 0xff);
+            buffer[16] = (uint8_t)(magnValueZ & 0xff);
+            buffer[17] = (uint8_t)((magnValueZ >> 8) & 0xff);
+        }
+
+        buffer[18] = (uint8_t)(timestamp & 0xff);
+        buffer[19] = (uint8_t)((timestamp >> 8) & 0xff);
+
+        // Write the result to measChar. This results INDICATE to be triggered in GATT service
+        WB_RES::Characteristic newMeasCharValue;
+        newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
+        asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
+    }
+}
+
+void CustomGATTSvcClient::handleSingleSensorData(uint32_t timestamp, const whiteboard::Array<whiteboard::FloatVector3D>& arrayData) {
+    uint8_t buffer[20];
+    buffer[0]=0;
+
+    for (size_t i = 0; i < arrayData.size(); i++)
+    {
+        whiteboard::FloatVector3D value = arrayData[i];
+
+        uint16_t valueX = convertFloatTo16bitInt(value.mX);
+        uint16_t valueY = convertFloatTo16bitInt(value.mY);
+        uint16_t valueZ = convertFloatTo16bitInt(value.mZ);
+
+        // Big-endian
+        buffer[0] = (uint8_t)(valueX & 0xff);
+        buffer[1] = (uint8_t)((valueX >> 8) & 0xff);
+        buffer[2] = (uint8_t)(valueY & 0xff);
+        buffer[3] = (uint8_t)((valueY >> 8) & 0xff);
+        buffer[4] = (uint8_t)(valueZ & 0xff);
+        buffer[5] = (uint8_t)((valueZ >> 8) & 0xff);
+
+        buffer[6] = (uint8_t)(valueX & 0xff);
+        buffer[7] = (uint8_t)((valueX >> 8) & 0xff);
+        buffer[8] = (uint8_t)(valueY & 0xff);
+        buffer[9] = (uint8_t)((valueY >> 8) & 0xff);
+        buffer[10] = (uint8_t)(valueZ & 0xff);
+        buffer[11] = (uint8_t)((valueZ >> 8) & 0xff);
+        buffer[12] = (uint8_t)(valueX & 0xff);
+        buffer[13] = (uint8_t)((valueX >> 8) & 0xff);
+        buffer[14] = (uint8_t)(valueY & 0xff);
+        buffer[15] = (uint8_t)((valueY >> 8) & 0xff);
+        buffer[16] = (uint8_t)(valueZ & 0xff);
+        buffer[17] = (uint8_t)((valueZ >> 8) & 0xff);
+
+
+        buffer[18] = (uint8_t)(timestamp & 0xff);
+        buffer[19] = (uint8_t)((timestamp >> 8) & 0xff);
+
+        // Write the result to measChar. This results INDICATE to be triggered in GATT service
+        WB_RES::Characteristic newMeasCharValue;
+        newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
+        asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
     }
 }
