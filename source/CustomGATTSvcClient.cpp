@@ -192,7 +192,8 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                 uint8_t commandValueLower = *reinterpret_cast<const uint8_t*>(&charValue.bytes[0]);
                 uint8_t commandValueHigher = *reinterpret_cast<const uint8_t*>(&charValue.bytes[1]);
 
-                uint16_t commandValue = ((uint16_t)commandValueLower << 8) | commandValueHigher;
+                //uint16_t commandValue = ((uint16_t)commandValueLower << 8) | commandValueHigher;
+                uint16_t commandValue = ((uint16_t)commandValueHigher << 8) | commandValueLower;
 
                 handleCommand(commandValue);
             }
