@@ -7,7 +7,9 @@
 #include "comm_ble_gattsvc/resources.h"
 #include "comm_ble/resources.h"
 #include <meas_temp/resources.h>
-#include "meas_acc/resources.h"
+#include <meas_acc/resources.h>
+#include <meas_gyro/resources.h>
+#include <meas_magn/resources.h>
 #include <meas_imu/resources.h>
 #include <cstdint>
 #include "whiteboard/builtinTypes/UnknownStructure.h"
@@ -17,9 +19,6 @@
 
 const char* const CustomGATTSvcClient::LAUNCHABLE_NAME = "CstGattS";
 
-// Nytt
-const size_t BLINK_PERIOD_MS = 800;
-whiteboard::TimerId mTimer;
 whiteboard::ResourceId	mMeasResourceId;
 char resourceFullString[30] = "Meas/Acc/13";
 char measAccResourceBase[] = "Meas/Acc/";
@@ -45,7 +44,6 @@ CustomGATTSvcClient::CustomGATTSvcClient()
       mMeasCharResource(whiteboard::ID_INVALID_RESOURCE),
       mMeasurementTimer(whiteboard::ID_INVALID_TIMER)
 {
-    mTimer = whiteboard::ID_INVALID_TIMER;
 }
 
 CustomGATTSvcClient::~CustomGATTSvcClient()
@@ -69,16 +67,6 @@ bool CustomGATTSvcClient::startModule()
 
     // Configure custom gatt service
     configGattSvc();
-    //mTimer = startTimer(BLINK_PERIOD_MS, true);
-    //asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, 26);
-    /*whiteboard::ResourceId	mMeasAccResourceId;
-    char test[] = "Meas/Acc/52";
-    wb::Result result = getResource(test, mMeasAccResourceId);
-    if (!wb::RETURN_OKC(result))
-    {
-        return whiteboard::HTTP_CODE_BAD_REQUEST;
-    }
-    result = asyncSubscribe(mMeasAccResourceId, AsyncRequestOptions::Empty);*/
 
     return true;
 }
@@ -86,23 +74,11 @@ bool CustomGATTSvcClient::startModule()
 /** @see whiteboard::ILaunchableModule::startModule */
 void CustomGATTSvcClient::stopModule()
 {
-    // Stop timer if running
-    if (mMeasurementTimer != whiteboard::ID_INVALID_TIMER)
-        stopTimer(mMeasurementTimer);
-
-    // Nytt
-    if (mTimer != whiteboard::ID_INVALID_TIMER)
-        stopTimer(mTimer);
-
-    mTimer = whiteboard::ID_INVALID_TIMER;
-
     // Unsubscribe if needed
     if (mIntervalCharResource != whiteboard::ID_INVALID_RESOURCE)
         asyncUnsubscribe(mIntervalCharResource);
     if (mMeasCharResource != whiteboard::ID_INVALID_RESOURCE)
         asyncUnsubscribe(mMeasCharResource);
-
-    mMeasurementTimer = whiteboard::ID_INVALID_TIMER;
 }
 
 #include "ui_ind/resources.h"
@@ -115,11 +91,9 @@ void CustomGATTSvcClient::configGattSvc() {
     const uint16_t healthThermometerSvcUUID16 = 0x1809;
     
     // Define the CMD characteristics
-    //WB_RES::GattProperty measCharProp = WB_RES::GattProperty::INDICATE;
     WB_RES::GattProperty measCharProp[3] = {WB_RES::GattProperty::NOTIFY, WB_RES::GattProperty::READ, WB_RES::GattProperty::WRITE};
     WB_RES::GattProperty intervalCharProps[2] = {WB_RES::GattProperty::READ, WB_RES::GattProperty::WRITE};
 
-    //measChar.props = whiteboard::MakeArray<WB_RES::GattProperty>( &measCharProp, 1);
     measChar.props = whiteboard::MakeArray<WB_RES::GattProperty>( measCharProp, 3);
     measChar.uuid = whiteboard::MakeArray<uint8_t>( reinterpret_cast<const uint8_t*>(&measCharUUID16), 2);
 
@@ -135,46 +109,7 @@ void CustomGATTSvcClient::configGattSvc() {
     asyncPost(WB_RES::LOCAL::COMM_BLE_GATTSVC(), AsyncRequestOptions::Empty, customGattSvc);
 }
 
-void CustomGATTSvcClient::onTimer(whiteboard::TimerId timerId)
-{
-    DEBUGLOG("CustomGATTSvcClient::onTimer");
-
-    if (timerId == mTimer)
-    {
-        uint16_t indicationType = 2; // SHORT_VISUAL_INDICATION, defined in ui/ind.yaml
-        // Make PUT request to trigger led blink
-        asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
-        ////////////
-    }
-
-    // Take temperature reading
-    //asyncGet(WB_RES::LOCAL::MEAS_TEMP(), NULL);
-    //asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE(), AsyncRequestOptions::Empty, 13);
-}
-
 #include <math.h>
-#include <cstdint>
-
-static void floatToFLOAT(float value, uint8_t* bufferOut)
-{
-    bool bNegative = (value < 0.0f);
-    if (bNegative) value = fabs(value);
-
-    // Calc exponent
-    int exponent = ceil(log10(value));
-    DEBUGLOG("exponent: %d", exponent);
-
-    float mantissa = value * pow(10.0, -exponent + 6); // Use up to 10^6 in mantissa (+-1000,000)
-    int32_t mantInt24 = (int32_t)round(mantissa);
-    if (bNegative)
-        mantInt24 = -mantInt24;
-    DEBUGLOG("mantInt24: %d", mantInt24);
-
-    bufferOut[0] = (uint8_t)(mantInt24 & 0xff);
-    bufferOut[1] = (uint8_t)((mantInt24>>8) & 0xff);
-    bufferOut[2] = (uint8_t)((mantInt24>>16) & 0xff);
-    bufferOut[3] = (int8_t)exponent-6;
-}
 
 void CustomGATTSvcClient::onGetResult(whiteboard::RequestId requestId, whiteboard::ResourceId resourceId, whiteboard::Result resultCode, const whiteboard::Value& rResultData)
 {
@@ -212,40 +147,14 @@ void CustomGATTSvcClient::onGetResult(whiteboard::RequestId requestId, whiteboar
             asyncSubscribe(mMeasCharResource, AsyncRequestOptions::Empty);
         }
         break;
-
-        case WB_RES::LOCAL::MEAS_TEMP::LID:
-        {
-            // Temperature result or error
-            if (resultCode == whiteboard::HTTP_CODE_OK)
-            {
-                WB_RES::TemperatureValue value = rResultData.convertTo<WB_RES::TemperatureValue>();
-                float temperature = value.measurement;
-
-                // Convert K to C
-                temperature -= 273.15;
-
-                // Return data
-                uint8_t buffer[5]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
-                buffer[0]=0;
-
-                // convert normal float to IEEE-11073 "medical" FLOAT type into buffer
-                floatToFLOAT(temperature, &buffer[1]);
-
-                // Write the result to measChar. This results INDICATE to be triggered in GATT service
-                WB_RES::Characteristic newMeasCharValue;
-                newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
-                asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
-            }
-        }
-        break;
     }
 }
 
-uint16_t convertFloatTo16bitInt (float &num) {
+uint16_t CustomGATTSvcClient::convertFloatTo16bitInt (float &num) {
     return (uint16_t) round(NR_SIZE * (num + SPAN/2) / SPAN);
 }
 
-void buildResourceString(char *base, uint16_t samplerate, char destination[]) {
+void CustomGATTSvcClient::buildResourceString(char *base, uint16_t samplerate, char destination[]) {
 
     int i;
     for(i = 0; *base != '\0'; base++) {
@@ -283,223 +192,22 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                 uint8_t commandValueLower = *reinterpret_cast<const uint8_t*>(&charValue.bytes[0]);
                 uint8_t commandValueHigher = *reinterpret_cast<const uint8_t*>(&charValue.bytes[1]);
 
-                if (commandValueHigher == 255 && commandValueLower == 255) {
-                    // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                    uint16_t indicationType = 2;
-                    asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
-                }
-
-                // uint16_t commandValue = ((uint16_t)commandValueHigher << 8) | commandValueLower;
                 uint16_t commandValue = ((uint16_t)commandValueLower << 8) | commandValueHigher;
 
-                uint16_t commandValueType = commandValue / 100;
-
-                switch(commandValueType) {
-                    case 0 :
-                        // General command settings
-                        switch(commandValue % 100) {
-                            case 0:
-                                // Shutdown - i.e. stop subscribing to chosen resource.
-                                if (isRunning)
-                                {
-                                    wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
-                                    if (wb::RETURN_OKC(result)) {
-                                        uint16_t indicationType = 2;
-                                        asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
-                                                 indicationType);
-                                        isRunning = false;
-                                    }
-                                }
-                                break;
-                            case 1:
-                                // Start subscribing - i.e. to the chosen resource.
-                                if (isRunning) {
-                                    wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
-                                    if (wb::RETURN_OKC(result)) {
-
-                                        wb::Result result = getResource(resourceFullString, mMeasResourceId);
-                                        if (wb::RETURN_OKC(result)) {
-                                            // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                                            uint16_t indicationType = 2;
-                                            asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
-                                                     indicationType);
-                                            isRunning = true;
-                                        }
-                                    }
-                                } else {
-                                    wb::Result result = getResource(resourceFullString, mMeasResourceId);
-                                    if (wb::RETURN_OKC(result)) {
-                                        // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                                        uint16_t indicationType = 2;
-                                        asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
-                                                 indicationType);
-                                        isRunning = true;
-                                    }
-                                }
-                                break;
-                            default:
-                                // Not valid command. Do nothing.
-                                break;
-                        }
-                        break;
-                    case 1 :
-                        // Accelerometer
-                        if (commandValue % 100 > 9) {
-                            // Record data with DataLogger <- implement later
-                        } else {
-                            uint16_t sampleRateValue = commandValue % 10;
-                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
-
-                            buildResourceString(measAccResourceBase, sampleRate, resourceFullString);
-                        }
-                        break;
-                    case 2 :
-                        // Gyroscope
-                        if (commandValue % 100 > 9) {
-                            // Record data with DataLogger <- implement later
-                        } else {
-                            uint16_t sampleRateValue = commandValue % 10;
-                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
-
-                            buildResourceString(measGyroResourceBase, sampleRate, resourceFullString);
-                        }
-                        break;
-                    case 3 :
-                        // Magnetometer
-                        if (commandValue % 100 > 9) {
-                            // Record data with DataLogger <- implement later
-                        } else {
-                            uint16_t sampleRateValue = commandValue % 10;
-                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
-
-                            buildResourceString(measMagnResourceBase, sampleRate, resourceFullString);
-                        }
-                        break;
-                    case 6 :
-                        // IMU6
-                        if (commandValue % 100 > 9) {
-                            // Record data with DataLogger <- implement later
-                        } else {
-                            uint16_t sampleRateValue = commandValue % 10;
-                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
-
-                            buildResourceString(measIMU6ResourceBase, sampleRate, resourceFullString);
-                        }
-                        break;
-                    case 9 :
-                        // IMU9
-                        /*if (commandValue % 100 > 9) {
-                            // Record data with DataLogger <- implement later
-                        } else {
-                            uint16_t sampleRateValue = commandValue % 10;
-                            uint16_t sampleRate = 13 * (2^sampleRateValue);
-                            wb::Result resultAcc = asyncUnsubscribe(WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::ID);
-                            wb::Result resultImu9 = asyncUnsubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID);
-                            wb::Result result = asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, sampleRate);
-                            if (wb::RETURN_OKC(result))
-                            {
-                                // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                                uint16_t indicationType = 2;
-                                asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
-                            }
-                        }*/
-                        if (commandValue % 100 > 9) {
-                            // Record data with DataLogger <- implement later
-                        } else {
-                            uint16_t sampleRateValue = commandValue % 10;
-                            uint16_t sampleRate = 13 * pow(2, sampleRateValue);
-
-                            buildResourceString(measIMU9ResourceBase, sampleRate, resourceFullString);
-                        }
-                        break;
-                    default :
-                        // Not implemented, do nothing
-                        break;
-                }
-
-                /*if (interval >= 0 && interval <= 4) {
-                    int sampleRate = 13 * (2^interval);
-                    wb::Result result = asyncUnsubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, NULL);
-                    if (wb::RETURN_OKC(result))
-                    {
-                        wb::Result result2 = asyncSubscribe(WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::ID, AsyncRequestOptions::Empty, sampleRate);
-                        if (wb::RETURN_OKC(result2)) {
-                            uint16_t indicationType = 2; // SHORT_VISUAL_INDICATION, defined in ui/ind.yaml
-                            // Make PUT request to trigger led blink
-                            asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty, indicationType);
-                        }
-                    }
-                }*/
+                handleCommand(commandValue);
             }
             else if (parameterRef.getCharHandle() == mMeasCharHandle) 
             {
-                /*const WB_RES::Characteristic &charValue = value.convertTo<const WB_RES::Characteristic &>();
-                bool bNotificationsEnabled = charValue.notifications.hasValue() ? charValue.notifications.getValue() : false;
-                DEBUGLOG("onNotify: mMeasCharHandle. bNotificationsEnabled: %d", bNotificationsEnabled);
-                // Start or stop the timer
-                if (mMeasurementTimer != whiteboard::ID_INVALID_TIMER)
-                {
-                    stopTimer(mMeasurementTimer);
-                    mMeasurementTimer = whiteboard::ID_INVALID_TIMER;
-                }
-                if (bNotificationsEnabled)
-                    mMeasurementTimer = startTimer(mMeasIntervalSecs*1000, true);*/
                 const WB_RES::Characteristic &charValue = value.convertTo<const WB_RES::Characteristic &>();
                 bool bNotificationsEnabled = charValue.notifications.hasValue() ? charValue.notifications.getValue() : false;
 
-                if (bNotificationsEnabled) {
-                    if (isRunning) {
-                        wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
-                        if (wb::RETURN_OKC(result)) {
-
-                            wb::Result result2 = getResource(resourceFullString, mMeasResourceId);
-                            if (wb::RETURN_OKC(result2)) {
-                                // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                                wb::Result result3 = asyncSubscribe(mMeasResourceId, AsyncRequestOptions::Empty);
-                                if (wb::RETURN_OKC(result3)) {
-                                    uint16_t indicationType = 2;
-                                    asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
-                                             indicationType);
-                                    isRunning = true;
-                                }
-                            }
-                        }
-                    } else {
-                        wb::Result result = getResource(resourceFullString, mMeasResourceId);
-                        if (wb::RETURN_OKC(result)) {
-                            // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                            wb::Result result2 = asyncSubscribe(mMeasResourceId, AsyncRequestOptions::Empty);
-                            if (wb::RETURN_OKC(result2)) {
-                                uint16_t indicationType = 2;
-                                asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
-                                         indicationType);
-                                isRunning = true;
-                            }
-                        }
-                    }
-                } else {
-                    if (isRunning) {
-                        wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
-                        if (wb::RETURN_OKC(result)) {
-                            // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
-                            uint16_t indicationType = 2;
-                            asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
-                                         indicationType);
-                            isRunning = false;
-                        }
-                    }
-                }
+                handleNotification(bNotificationsEnabled);
             }
         }
         break;
 
         case WB_RES::LOCAL::MEAS_IMU9_SAMPLERATE::LID:
         {
-            /*if (!isRunning) {
-                // Not running, do nothing...
-                return;
-            }*/
-
             // Temperature result or error
             const WB_RES::IMU9Data& imu9Data = value.convertTo<const WB_RES::IMU9Data&>();
 
@@ -513,84 +221,16 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
             const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataGyro = imu9Data.arrayGyro;
             const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataMagn = imu9Data.arrayMagn;
 
-            // For later use
+            // Timestamp
             uint32_t relativeTime = imu9Data.timestamp;
 
-            // Just in case arrays would prove to be of different length (probably highly unlikely..)
-            size_t max = arrayDataAcc.size();
-            if (arrayDataGyro.size() > max) { max = arrayDataGyro.size(); }
-            if (arrayDataMagn.size() > max) { max = arrayDataMagn.size(); }
-
-            uint8_t buffer[20]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
-            buffer[0]=0;
-
-            for (size_t i = 0; i < max; i++)
-            {
-                if (arrayDataAcc.size() >= max) {
-                    whiteboard::FloatVector3D accValue = arrayDataAcc[i];
-
-                    uint16_t accValueX = convertFloatTo16bitInt(accValue.mX);
-                    uint16_t accValueY = convertFloatTo16bitInt(accValue.mY);
-                    uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
-
-                    // Big-endian
-                    buffer[0] = (uint8_t)(accValueX & 0xff);
-                    buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
-                    buffer[2] = (uint8_t)(accValueY & 0xff);
-                    buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
-                    buffer[4] = (uint8_t)(accValueZ & 0xff);
-                    buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
-                }
-
-                if (arrayDataGyro.size() >= max) {
-                    whiteboard::FloatVector3D gyroValue = arrayDataGyro[i];
-
-                    uint16_t gyroValueX = convertFloatTo16bitInt(gyroValue.mX);
-                    uint16_t gyroValueY = convertFloatTo16bitInt(gyroValue.mY);
-                    uint16_t gyroValueZ = convertFloatTo16bitInt(gyroValue.mZ);
-
-                    buffer[6] = (uint8_t)(gyroValueX & 0xff);
-                    buffer[7] = (uint8_t)((gyroValueX >> 8) & 0xff);
-                    buffer[8] = (uint8_t)(gyroValueY & 0xff);
-                    buffer[9] = (uint8_t)((gyroValueY >> 8) & 0xff);
-                    buffer[10] = (uint8_t)(gyroValueZ & 0xff);
-                    buffer[11] = (uint8_t)((gyroValueZ >> 8) & 0xff);
-                }
-
-                if (arrayDataMagn.size() >= max) {
-                    whiteboard::FloatVector3D magnValue = arrayDataMagn[i];
-
-                    uint16_t magnValueX = convertFloatTo16bitInt(magnValue.mX);
-                    uint16_t magnValueY = convertFloatTo16bitInt(magnValue.mY);
-                    uint16_t magnValueZ = convertFloatTo16bitInt(magnValue.mZ);
-
-                    buffer[12] = (uint8_t)(magnValueX & 0xff);
-                    buffer[13] = (uint8_t)((magnValueX >> 8) & 0xff);
-                    buffer[14] = (uint8_t)(magnValueY & 0xff);
-                    buffer[15] = (uint8_t)((magnValueY >> 8) & 0xff);
-                    buffer[16] = (uint8_t)(magnValueZ & 0xff);
-                    buffer[17] = (uint8_t)((magnValueZ >> 8) & 0xff);
-                }
-
-                buffer[18] = (uint8_t)(relativeTime & 0xff);
-                buffer[19] = (uint8_t)((relativeTime >> 8) & 0xff);
-
-                // Write the result to measChar. This results INDICATE to be triggered in GATT service
-                WB_RES::Characteristic newMeasCharValue;
-                newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
-                asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
-            }
+            handleSensorDataIMU9(relativeTime, arrayDataAcc, arrayDataGyro, arrayDataMagn);
         }
         break;
 
         case WB_RES::LOCAL::MEAS_ACC_SAMPLERATE::LID:
         {
-            /*if (!isRunning) {
-                // Not running, do nothing...
-                return;
-            }*/
-
-            // Temperature result or error
+            // Accelerometer result or error
             const WB_RES::AccData& accData = value.convertTo<const WB_RES::AccData&>();
 
             if (accData.arrayAcc.size() <= 0)
@@ -603,47 +243,45 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
 
             uint32_t relativeTime = accData.timestamp;
 
-            uint8_t buffer[20]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
-            buffer[0]=0;
+            handleSingleSensorData(relativeTime, arrayDataAcc);
+        }
+        break;
 
-            for (size_t i = 0; i < arrayDataAcc.size(); i++)
+        case WB_RES::LOCAL::MEAS_GYRO_SAMPLERATE::LID:
+        {
+            // Accelerometer result or error
+            const WB_RES::GyroData& gyroData = value.convertTo<const WB_RES::GyroData&>();
+
+            if (gyroData.arrayGyro.size() <= 0)
             {
-                whiteboard::FloatVector3D accValue = arrayDataAcc[i];
-
-                uint16_t accValueX = convertFloatTo16bitInt(accValue.mX);
-                uint16_t accValueY = convertFloatTo16bitInt(accValue.mY);
-                uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
-
-                // Big-endian
-                buffer[0] = (uint8_t)(accValueX & 0xff);
-                buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
-                buffer[2] = (uint8_t)(accValueY & 0xff);
-                buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
-                buffer[4] = (uint8_t)(accValueZ & 0xff);
-                buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
-
-                buffer[6] = (uint8_t)(accValueX & 0xff);
-                buffer[7] = (uint8_t)((accValueX >> 8) & 0xff);
-                buffer[8] = (uint8_t)(accValueY & 0xff);
-                buffer[9] = (uint8_t)((accValueY >> 8) & 0xff);
-                buffer[10] = (uint8_t)(accValueZ & 0xff);
-                buffer[11] = (uint8_t)((accValueZ >> 8) & 0xff);
-                buffer[12] = (uint8_t)(accValueX & 0xff);
-                buffer[13] = (uint8_t)((accValueX >> 8) & 0xff);
-                buffer[14] = (uint8_t)(accValueY & 0xff);
-                buffer[15] = (uint8_t)((accValueY >> 8) & 0xff);
-                buffer[16] = (uint8_t)(accValueZ & 0xff);
-                buffer[17] = (uint8_t)((accValueZ >> 8) & 0xff);
-
-
-                buffer[18] = (uint8_t)(relativeTime & 0xff);
-                buffer[19] = (uint8_t)((relativeTime >> 8) & 0xff);
-
-                // Write the result to measChar. This results INDICATE to be triggered in GATT service
-                WB_RES::Characteristic newMeasCharValue;
-                newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
-                asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
+                // Some values are missing, do nothing...
+                return;
             }
+
+            const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataGyro = gyroData.arrayGyro;
+
+            uint32_t relativeTime = gyroData.timestamp;
+
+            handleSingleSensorData(relativeTime, arrayDataGyro);
+        }
+        break;
+
+        case WB_RES::LOCAL::MEAS_MAGN_SAMPLERATE::LID:
+        {
+            // Accelerometer result or error
+            const WB_RES::MagnData& magnData = value.convertTo<const WB_RES::MagnData&>();
+
+            if (magnData.arrayMagn.size() <= 0)
+            {
+                // Some values are missing, do nothing...
+                return;
+            }
+
+            const whiteboard::Array<whiteboard::FloatVector3D>& arrayDataMagn = magnData.arrayMagn;
+
+            uint32_t relativeTime = magnData.timestamp;
+
+            handleSingleSensorData(relativeTime, arrayDataMagn);
         }
     }
 }
@@ -661,5 +299,245 @@ void CustomGATTSvcClient::onPostResult(whiteboard::RequestId requestId,
         
         // Request more info about created svc so we get the char handles
         asyncGet(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle);
+    }
+}
+
+void CustomGATTSvcClient::showLedIndication(uint16_t indicationType) {
+    asyncPut(WB_RES::LOCAL::UI_IND_VISUAL::ID, AsyncRequestOptions::Empty,
+             indicationType);
+}
+
+uint16_t CustomGATTSvcClient::calculateSampleRate(uint16_t sampleRateValue) {
+    return 13 * pow(2, sampleRateValue);
+}
+
+void CustomGATTSvcClient::handleCommand(uint16_t command) {
+    uint16_t commandValueType = command / 100;
+
+    switch(commandValueType) {
+        case 0 :
+            // General command settings
+            switch(command % 100) {
+                case 0:
+                    // Shutdown - i.e. stop subscribing to chosen resource.
+                    if (isRunning)
+                    {
+                        // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                        wb::Result result = asyncUnsubscribe(mMeasResourceId, NULL);
+                        if (wb::RETURN_OKC(result)) {
+                            showLedIndication(2);
+                            isRunning = false;
+                        }
+                    }
+                    break;
+                default:
+                    // Not valid command. Do nothing.
+                    break;
+            }
+            break;
+        case 1 :
+            // Accelerometer
+            if (command % 100 > 9) {
+                // Record data with DataLogger <- implement later
+            } else {
+                uint16_t sampleRate = calculateSampleRate(command % 10);
+                buildResourceString(measAccResourceBase, sampleRate, resourceFullString);
+                showLedIndication(2);
+            }
+            break;
+        case 2 :
+            // Gyroscope
+            if (command % 100 > 9) {
+                // Record data with DataLogger <- implement later
+            } else {
+                uint16_t sampleRate = calculateSampleRate(command % 10);
+                buildResourceString(measGyroResourceBase, sampleRate, resourceFullString);
+                showLedIndication(2);
+            }
+            break;
+        case 3 :
+            // Magnetometer
+            if (command % 100 > 9) {
+                // Record data with DataLogger <- implement later
+            } else {
+                uint16_t sampleRate = calculateSampleRate(command % 10);
+                buildResourceString(measMagnResourceBase, sampleRate, resourceFullString);
+                showLedIndication(2);
+            }
+            break;
+        case 6 :
+            // IMU6
+            if (command % 100 > 9) {
+                // Record data with DataLogger <- implement later
+            } else {
+                uint16_t sampleRate = calculateSampleRate(command % 10);
+                buildResourceString(measIMU6ResourceBase, sampleRate, resourceFullString);
+                showLedIndication(2);
+            }
+            break;
+        case 9 :
+            // IMU9
+            if (command % 100 > 9) {
+                // Record data with DataLogger <- implement later
+            } else {
+                uint16_t sampleRate = calculateSampleRate(command % 10);
+                buildResourceString(measIMU9ResourceBase, sampleRate, resourceFullString);
+                showLedIndication(2);
+            }
+            break;
+        default :
+            // Not implemented, do nothing
+            break;
+    }
+}
+
+void CustomGATTSvcClient::handleNotification(bool isNotificationEnabled) {
+    if (isNotificationEnabled) {
+        if (isRunning) {
+            wb::Result unsubResult = asyncUnsubscribe(mMeasResourceId, NULL);
+            if (wb::RETURN_OKC(unsubResult)) {
+
+                wb::Result resResult = getResource(resourceFullString, mMeasResourceId);
+                if (wb::RETURN_OKC(resResult)) {
+                    // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                    wb::Result subResult = asyncSubscribe(mMeasResourceId, AsyncRequestOptions::Empty);
+                    if (wb::RETURN_OKC(subResult)) {
+                        showLedIndication(2);
+                        isRunning = true;
+                    }
+                }
+            }
+        } else {
+            wb::Result resResult = getResource(resourceFullString, mMeasResourceId);
+            if (wb::RETURN_OKC(resResult)) {
+                // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                wb::Result subResult = asyncSubscribe(mMeasResourceId, AsyncRequestOptions::Empty);
+                if (wb::RETURN_OKC(subResult)) {
+                    // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                    showLedIndication(2);
+                    isRunning = true;
+                }
+            }
+        }
+    } else {
+        if (isRunning) {
+            wb::Result unsubResult = asyncUnsubscribe(mMeasResourceId, NULL);
+            if (wb::RETURN_OKC(unsubResult)) {
+                // Blink to acknowledge command (SHORT_VISUAL_INDICATION)
+                showLedIndication(2);
+                isRunning = false;
+            }
+        }
+    }
+}
+
+void CustomGATTSvcClient::handleSensorDataIMU9(uint32_t timestamp, const whiteboard::Array<whiteboard::FloatVector3D>& accData, const whiteboard::Array<whiteboard::FloatVector3D>& gyroData, const whiteboard::Array<whiteboard::FloatVector3D>& magnData) {
+    // Just in case arrays would prove to be of different length (probably highly unlikely..)
+    size_t max = accData.size();
+    if (gyroData.size() > max) { max = gyroData.size(); }
+    if (magnData.size() > max) { max = magnData.size(); }
+
+    uint8_t buffer[20]; // 1 byte or flags, 4 for FLOAT "in Celsius" value
+    buffer[0]=0;
+
+    for (size_t i = 0; i < max; i++)
+    {
+        if (accData.size() >= max) {
+            whiteboard::FloatVector3D accValue = accData[i];
+
+            uint16_t accValueX = convertFloatTo16bitInt(accValue.mX);
+            uint16_t accValueY = convertFloatTo16bitInt(accValue.mY);
+            uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
+
+            // Big-endian
+            buffer[0] = (uint8_t)(accValueX & 0xff);
+            buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
+            buffer[2] = (uint8_t)(accValueY & 0xff);
+            buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
+            buffer[4] = (uint8_t)(accValueZ & 0xff);
+            buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
+        }
+
+        if (gyroData.size() >= max) {
+            whiteboard::FloatVector3D gyroValue = gyroData[i];
+
+            uint16_t gyroValueX = convertFloatTo16bitInt(gyroValue.mX);
+            uint16_t gyroValueY = convertFloatTo16bitInt(gyroValue.mY);
+            uint16_t gyroValueZ = convertFloatTo16bitInt(gyroValue.mZ);
+
+            buffer[6] = (uint8_t)(gyroValueX & 0xff);
+            buffer[7] = (uint8_t)((gyroValueX >> 8) & 0xff);
+            buffer[8] = (uint8_t)(gyroValueY & 0xff);
+            buffer[9] = (uint8_t)((gyroValueY >> 8) & 0xff);
+            buffer[10] = (uint8_t)(gyroValueZ & 0xff);
+            buffer[11] = (uint8_t)((gyroValueZ >> 8) & 0xff);
+        }
+
+        if (magnData.size() >= max) {
+            whiteboard::FloatVector3D magnValue = magnData[i];
+
+            uint16_t magnValueX = convertFloatTo16bitInt(magnValue.mX);
+            uint16_t magnValueY = convertFloatTo16bitInt(magnValue.mY);
+            uint16_t magnValueZ = convertFloatTo16bitInt(magnValue.mZ);
+
+            buffer[12] = (uint8_t)(magnValueX & 0xff);
+            buffer[13] = (uint8_t)((magnValueX >> 8) & 0xff);
+            buffer[14] = (uint8_t)(magnValueY & 0xff);
+            buffer[15] = (uint8_t)((magnValueY >> 8) & 0xff);
+            buffer[16] = (uint8_t)(magnValueZ & 0xff);
+            buffer[17] = (uint8_t)((magnValueZ >> 8) & 0xff);
+        }
+
+        buffer[18] = (uint8_t)(timestamp & 0xff);
+        buffer[19] = (uint8_t)((timestamp >> 8) & 0xff);
+
+        // Write the result to measChar. This results INDICATE to be triggered in GATT service
+        WB_RES::Characteristic newMeasCharValue;
+        newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
+        asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
+    }
+}
+
+void CustomGATTSvcClient::handleSingleSensorData(uint32_t timestamp, const whiteboard::Array<whiteboard::FloatVector3D>& arrayData) {
+    uint8_t buffer[20];
+    buffer[0]=0;
+
+    for (size_t i = 0; i < arrayData.size(); i++)
+    {
+        whiteboard::FloatVector3D value = arrayData[i];
+
+        uint16_t valueX = convertFloatTo16bitInt(value.mX);
+        uint16_t valueY = convertFloatTo16bitInt(value.mY);
+        uint16_t valueZ = convertFloatTo16bitInt(value.mZ);
+
+        // Big-endian
+        buffer[0] = (uint8_t)(valueX & 0xff);
+        buffer[1] = (uint8_t)((valueX >> 8) & 0xff);
+        buffer[2] = (uint8_t)(valueY & 0xff);
+        buffer[3] = (uint8_t)((valueY >> 8) & 0xff);
+        buffer[4] = (uint8_t)(valueZ & 0xff);
+        buffer[5] = (uint8_t)((valueZ >> 8) & 0xff);
+
+        buffer[6] = (uint8_t)(valueX & 0xff);
+        buffer[7] = (uint8_t)((valueX >> 8) & 0xff);
+        buffer[8] = (uint8_t)(valueY & 0xff);
+        buffer[9] = (uint8_t)((valueY >> 8) & 0xff);
+        buffer[10] = (uint8_t)(valueZ & 0xff);
+        buffer[11] = (uint8_t)((valueZ >> 8) & 0xff);
+        buffer[12] = (uint8_t)(valueX & 0xff);
+        buffer[13] = (uint8_t)((valueX >> 8) & 0xff);
+        buffer[14] = (uint8_t)(valueY & 0xff);
+        buffer[15] = (uint8_t)((valueY >> 8) & 0xff);
+        buffer[16] = (uint8_t)(valueZ & 0xff);
+        buffer[17] = (uint8_t)((valueZ >> 8) & 0xff);
+
+
+        buffer[18] = (uint8_t)(timestamp & 0xff);
+        buffer[19] = (uint8_t)((timestamp >> 8) & 0xff);
+
+        // Write the result to measChar. This results INDICATE to be triggered in GATT service
+        WB_RES::Characteristic newMeasCharValue;
+        newMeasCharValue.bytes = whiteboard::MakeArray<uint8_t>(buffer, sizeof(buffer));
+        asyncPut(WB_RES::LOCAL::COMM_BLE_GATTSVC_SVCHANDLE_CHARHANDLE(), AsyncRequestOptions::Empty, mTemperatureSvcHandle, mMeasCharHandle, newMeasCharValue);
     }
 }
