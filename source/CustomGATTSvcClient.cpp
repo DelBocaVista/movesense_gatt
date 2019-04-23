@@ -192,7 +192,8 @@ void CustomGATTSvcClient::onNotify(whiteboard::ResourceId resourceId, const whit
                 uint8_t commandValueLower = *reinterpret_cast<const uint8_t*>(&charValue.bytes[0]);
                 uint8_t commandValueHigher = *reinterpret_cast<const uint8_t*>(&charValue.bytes[1]);
 
-                uint16_t commandValue = ((uint16_t)commandValueLower << 8) | commandValueHigher;
+                //uint16_t commandValue = ((uint16_t)commandValueLower << 8) | commandValueHigher;
+                uint16_t commandValue = ((uint16_t)commandValueHigher << 8) | commandValueLower;
 
                 handleCommand(commandValue);
             }
@@ -442,6 +443,9 @@ void CustomGATTSvcClient::handleSensorDataIMU9(uint32_t timestamp, const whitebo
 
     for (size_t i = 0; i < max; i++)
     {
+        buffer[0] = (uint8_t)(timestamp & 0xff);
+        buffer[1] = (uint8_t)((timestamp >> 8) & 0xff);
+
         if (accData.size() >= max) {
             whiteboard::FloatVector3D accValue = accData[i];
 
@@ -450,12 +454,12 @@ void CustomGATTSvcClient::handleSensorDataIMU9(uint32_t timestamp, const whitebo
             uint16_t accValueZ = convertFloatTo16bitInt(accValue.mZ);
 
             // Big-endian
-            buffer[0] = (uint8_t)(accValueX & 0xff);
-            buffer[1] = (uint8_t)((accValueX >> 8) & 0xff);
-            buffer[2] = (uint8_t)(accValueY & 0xff);
-            buffer[3] = (uint8_t)((accValueY >> 8) & 0xff);
-            buffer[4] = (uint8_t)(accValueZ & 0xff);
-            buffer[5] = (uint8_t)((accValueZ >> 8) & 0xff);
+            buffer[2] = (uint8_t)(accValueX & 0xff);
+            buffer[3] = (uint8_t)((accValueX >> 8) & 0xff);
+            buffer[4] = (uint8_t)(accValueY & 0xff);
+            buffer[5] = (uint8_t)((accValueY >> 8) & 0xff);
+            buffer[6] = (uint8_t)(accValueZ & 0xff);
+            buffer[7] = (uint8_t)((accValueZ >> 8) & 0xff);
         }
 
         if (gyroData.size() >= max) {
@@ -465,12 +469,12 @@ void CustomGATTSvcClient::handleSensorDataIMU9(uint32_t timestamp, const whitebo
             uint16_t gyroValueY = convertFloatTo16bitInt(gyroValue.mY);
             uint16_t gyroValueZ = convertFloatTo16bitInt(gyroValue.mZ);
 
-            buffer[6] = (uint8_t)(gyroValueX & 0xff);
-            buffer[7] = (uint8_t)((gyroValueX >> 8) & 0xff);
-            buffer[8] = (uint8_t)(gyroValueY & 0xff);
-            buffer[9] = (uint8_t)((gyroValueY >> 8) & 0xff);
-            buffer[10] = (uint8_t)(gyroValueZ & 0xff);
-            buffer[11] = (uint8_t)((gyroValueZ >> 8) & 0xff);
+            buffer[8] = (uint8_t)(gyroValueX & 0xff);
+            buffer[9] = (uint8_t)((gyroValueX >> 8) & 0xff);
+            buffer[10] = (uint8_t)(gyroValueY & 0xff);
+            buffer[11] = (uint8_t)((gyroValueY >> 8) & 0xff);
+            buffer[12] = (uint8_t)(gyroValueZ & 0xff);
+            buffer[13] = (uint8_t)((gyroValueZ >> 8) & 0xff);
         }
 
         if (magnData.size() >= max) {
@@ -480,16 +484,13 @@ void CustomGATTSvcClient::handleSensorDataIMU9(uint32_t timestamp, const whitebo
             uint16_t magnValueY = convertFloatTo16bitInt(magnValue.mY);
             uint16_t magnValueZ = convertFloatTo16bitInt(magnValue.mZ);
 
-            buffer[12] = (uint8_t)(magnValueX & 0xff);
-            buffer[13] = (uint8_t)((magnValueX >> 8) & 0xff);
-            buffer[14] = (uint8_t)(magnValueY & 0xff);
-            buffer[15] = (uint8_t)((magnValueY >> 8) & 0xff);
-            buffer[16] = (uint8_t)(magnValueZ & 0xff);
-            buffer[17] = (uint8_t)((magnValueZ >> 8) & 0xff);
+            buffer[14] = (uint8_t)(magnValueX & 0xff);
+            buffer[15] = (uint8_t)((magnValueX >> 8) & 0xff);
+            buffer[16] = (uint8_t)(magnValueY & 0xff);
+            buffer[17] = (uint8_t)((magnValueY >> 8) & 0xff);
+            buffer[18] = (uint8_t)(magnValueZ & 0xff);
+            buffer[19] = (uint8_t)((magnValueZ >> 8) & 0xff);
         }
-
-        buffer[18] = (uint8_t)(timestamp & 0xff);
-        buffer[19] = (uint8_t)((timestamp >> 8) & 0xff);
 
         // Write the result to measChar. This results INDICATE to be triggered in GATT service
         WB_RES::Characteristic newMeasCharValue;
@@ -511,29 +512,14 @@ void CustomGATTSvcClient::handleSingleSensorData(uint32_t timestamp, const white
         uint16_t valueZ = convertFloatTo16bitInt(value.mZ);
 
         // Big-endian
-        buffer[0] = (uint8_t)(valueX & 0xff);
-        buffer[1] = (uint8_t)((valueX >> 8) & 0xff);
-        buffer[2] = (uint8_t)(valueY & 0xff);
-        buffer[3] = (uint8_t)((valueY >> 8) & 0xff);
-        buffer[4] = (uint8_t)(valueZ & 0xff);
-        buffer[5] = (uint8_t)((valueZ >> 8) & 0xff);
-
-        buffer[6] = (uint8_t)(valueX & 0xff);
-        buffer[7] = (uint8_t)((valueX >> 8) & 0xff);
-        buffer[8] = (uint8_t)(valueY & 0xff);
-        buffer[9] = (uint8_t)((valueY >> 8) & 0xff);
-        buffer[10] = (uint8_t)(valueZ & 0xff);
-        buffer[11] = (uint8_t)((valueZ >> 8) & 0xff);
-        buffer[12] = (uint8_t)(valueX & 0xff);
-        buffer[13] = (uint8_t)((valueX >> 8) & 0xff);
-        buffer[14] = (uint8_t)(valueY & 0xff);
-        buffer[15] = (uint8_t)((valueY >> 8) & 0xff);
-        buffer[16] = (uint8_t)(valueZ & 0xff);
-        buffer[17] = (uint8_t)((valueZ >> 8) & 0xff);
-
-
-        buffer[18] = (uint8_t)(timestamp & 0xff);
-        buffer[19] = (uint8_t)((timestamp >> 8) & 0xff);
+        buffer[0] = (uint8_t)(timestamp & 0xff);
+        buffer[1] = (uint8_t)((timestamp >> 8) & 0xff);
+        buffer[2] = (uint8_t)(valueX & 0xff);
+        buffer[3] = (uint8_t)((valueX >> 8) & 0xff);
+        buffer[4] = (uint8_t)(valueY & 0xff);
+        buffer[5] = (uint8_t)((valueY >> 8) & 0xff);
+        buffer[6] = (uint8_t)(valueZ & 0xff);
+        buffer[7] = (uint8_t)((valueZ >> 8) & 0xff);
 
         // Write the result to measChar. This results INDICATE to be triggered in GATT service
         WB_RES::Characteristic newMeasCharValue;
