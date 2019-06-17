@@ -14,20 +14,27 @@
 #include <cstdint>
 #include "whiteboard/builtinTypes/UnknownStructure.h"
 
+// Span of numbers to be represented from sensors (i.e. 4000 equals range -2000 to 2000)
 #define SPAN 4000.0
+// Maximum number used to calculate which int to represent each float from sensors (higher number gives more accuracy)
 #define NR_SIZE 65535.0
 
 const char* const CustomGATTSvcClient::LAUNCHABLE_NAME = "CstGattS";
 
+// ReasourceId for fetching current chosen resource
 whiteboard::ResourceId	mMeasResourceId;
+// String to representate the URL of the resource that is being requested
 char resourceFullString[30] = "Meas/Acc/13";
+// "Static" base strings for building URL strings
 char measAccResourceBase[] = "Meas/Acc/";
 char measGyroResourceBase[] = "Meas/Gyro/";
 char measMagnResourceBase[] = "Meas/Magn/";
 char measIMU6ResourceBase[] = "Meas/IMU6/";
 char measIMU9ResourceBase[] = "Meas/IMU9/";
+// Indicates if notifications are currently subscribed to on measChar characteristic
 bool isRunning = false;
 
+// UUID16 of the characteristics
 const uint16_t measCharUUID16 = 0x2A1C;
 const uint16_t intervalCharUUID16 = 0x2A21;
 
